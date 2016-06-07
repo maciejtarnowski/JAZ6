@@ -1,5 +1,6 @@
 package rest;
 
+import domain.Category;
 import domain.Comment;
 import domain.Product;
 
@@ -7,11 +8,14 @@ import javax.ejb.Stateless;
 import javax.persistence.EntityManager;
 import javax.persistence.NoResultException;
 import javax.persistence.PersistenceContext;
+import javax.persistence.TypedQuery;
+import javax.persistence.criteria.*;
 import javax.ws.rs.*;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import javax.ws.rs.Path;
+import javax.ws.rs.core.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Path("/products")
 @Stateless
@@ -23,6 +27,61 @@ public class ProductResource {
     @Produces(MediaType.APPLICATION_JSON)
     public List<Product> getProducts() {
         return em.createNamedQuery("product.all", Product.class).getResultList();
+    }
+
+    @GET
+    @Path("/search")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<Product> searchProducts(@Context UriInfo uriInfo) {
+        CriteriaBuilder criteriaBuilder = em.getCriteriaBuilder();
+        CriteriaQuery<Product> criteriaQuery = criteriaBuilder.createQuery(Product.class);
+        Root<Product> product = criteriaQuery.from(Product.class);
+        criteriaQuery.select(product);
+        List<Predicate> predicates = new LinkedList<>();
+        MultivaluedMap<String, String> queryParameters = uriInfo.getQueryParameters();
+        ParameterExpression<Double> priceFromParam = null;
+        if (queryParameters.containsKey("priceFrom")) {
+            priceFromParam = criteriaBuilder.parameter(Double.class);
+            predicates.add(criteriaBuilder.greaterThanOrEqualTo(product.get("price"), priceFromParam));
+        }
+        ParameterExpression<Double> priceToParam = null;
+        if (queryParameters.containsKey("priceTo")) {
+            priceToParam = criteriaBuilder.parameter(Double.class);
+            predicates.add(criteriaBuilder.lessThanOrEqualTo(product.get("price"), priceToParam));
+        }
+        ParameterExpression<String> nameParam = null;
+        if (queryParameters.containsKey("name")) {
+            nameParam = criteriaBuilder.parameter(String.class);
+            predicates.add(criteriaBuilder.like(product.get("name"), nameParam));
+        }
+        ParameterExpression<Category> categoryParam = null;
+        if (queryParameters.containsKey("category")) {
+            categoryParam = criteriaBuilder.parameter(Category.class);
+            predicates.add(criteriaBuilder.equal(product.get("category"), categoryParam));
+        }
+
+        criteriaQuery.where(predicates.toArray(new Predicate[] {}));
+
+        TypedQuery<Product> productTypedQuery = em.createQuery(criteriaQuery);
+
+        if (queryParameters.containsKey("priceFrom")) {
+            productTypedQuery.setParameter(priceFromParam, Double.valueOf(queryParameters.getFirst("priceFrom")));
+        }
+        if (queryParameters.containsKey("priceTo")) {
+            productTypedQuery.setParameter(priceToParam, Double.valueOf(queryParameters.getFirst("priceTo")));
+        }
+        if (queryParameters.containsKey("name")) {
+            productTypedQuery.setParameter(nameParam, "%" + queryParameters.getFirst("name") + "%");
+        }
+        if (queryParameters.containsKey("category")) {
+            try {
+                productTypedQuery.setParameter(categoryParam, Category.valueOf(queryParameters.getFirst("category")));
+            } catch (IllegalArgumentException e) {
+                return new ArrayList<>();
+            }
+        }
+
+        return productTypedQuery.getResultList();
     }
 
     @GET
